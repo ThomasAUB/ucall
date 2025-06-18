@@ -28,55 +28,110 @@
 #pragma once
 
 #include <new>
+#include <utility>
 #include <cstddef>
-#include <stdint.h>
+#include <type_traits>
 
 namespace ucall {
 
-    template<typename return_t, typename ... args_t> struct Callable;
+    template<typename> struct Callable;
 
     template<typename return_t, typename ...args_t>
     struct Callable<return_t(args_t...)> {
 
-        template<typename callable_t>
-        Callable(callable_t&& c) {
-            make(c);
+        template<typename callable_t,
+            typename = std::enable_if_t<
+            std::is_invocable_r_v<return_t, callable_t, args_t...>>
+            >
+            Callable(callable_t&& c) {
+            using decayed = std::decay_t<callable_t>;
+            static_assert(
+                sizeof(decayed) <= storage_size,
+                "Callable object too large for internal storage."
+                );
+            static_assert(
+                alignof(decayed) <= storage_align,
+                "Callable object alignment too strict for internal storage."
+                );
+            mInterface = ::new(mStorage) Impl<decayed>(std::forward<callable_t>(c));
         }
 
         template<typename T>
-        Callable(T& c, return_t(T::* f)(args_t...)) {
+        Callable(return_t(T::* f)(args_t...), T& obj)
+            : Callable([&obj, f] (args_t... args) -> return_t { return (obj.*f)(args...); }) {}
 
-            //make([&c, f] (args_t... a) { return (c.*f)(a...); });
-            make([&] (args_t... a) { return (c.*f)(a...); });
+        template<typename T>
+        Callable(return_t(T::* f)(args_t...), T* obj)
+            : Callable([obj, f] (args_t... args) -> return_t { return (obj->*f)(args...); }) {}
+
+        template<typename T>
+        Callable(const T& obj, return_t(T::* f)(args_t...) const)
+            : Callable([&obj, f] (args_t... args) -> return_t { return (obj.*f)(args...); }) {}
+
+        return_t operator()(args_t... args) const {
+            return (*mInterface)(std::forward<args_t>(args)...);
         }
 
-        return_t operator()(args_t... args) {
-            return (*mInterface)(args...);
+        ~Callable() {
+            if (mInterface) {
+                mInterface->~Interface();
+            }
         }
+
+        Callable(Callable&& other) noexcept {
+            if (other.mInterface) {
+                // Reconstruct the vtable pointer and then move the underlying object
+                other.mInterface->move(mStorage);
+                mInterface = reinterpret_cast<Interface*>(mStorage);
+                other.mInterface = nullptr;
+            }
+        }
+
+        Callable& operator=(Callable&& other) noexcept {
+            if (this != &other) {
+                this->~Callable();
+                ::new(this) Callable(std::move(other));
+            }
+            return *this;
+        }
+
+        Callable(const Callable&) = delete;
+        Callable& operator=(const Callable&) = delete;
 
     private:
 
-        struct Interface { virtual return_t operator()(args_t...) = 0; };
-
-        template<typename c_t>
-        struct Impl : Interface {
-            c_t& mC;
-            Impl(c_t& c) : mC(c) {}
-            return_t operator()(args_t... a) override { return mC(a...); }
+        struct Interface {
+            virtual return_t operator()(args_t...) const = 0;
+            virtual void destroy() = 0;
+            virtual void move(void* dest) = 0;
+            virtual ~Interface() = default;
         };
 
         template<typename callable_t>
-        void make(callable_t&& c) {
-            static_assert(
-                sizeof(callable_t) <= sizeof(mStorage),
-                "Storage too small"
-            );
-            mInterface = ::new(mStorage) Impl<callable_t>(c);
-            //mInterface = ::new(mStorage) callable_t(c);
-        }
+        struct Impl final : Interface {
 
+            callable_t mCallable;
 
-        alignas(std::max_align_t) uint8_t mStorage[sizeof(uintptr_t) * 3];
+            template<typename... targs_t>
+            Impl(targs_t&&... args) : mCallable(std::forward<targs_t>(args)...) {}
+
+            return_t operator()(args_t... args) const override {
+                return mCallable(std::forward<args_t>(args)...);
+            }
+
+            void destroy() override {
+                mCallable.~callable_t();
+            }
+
+            void move(void* dest) override {
+                new (dest) Impl(std::move(mCallable));
+            }
+        };
+
+        static constexpr size_t storage_size = 4 * sizeof(uintptr_t);
+        static constexpr size_t storage_align = alignof(std::max_align_t);
+
+        alignas(storage_align) std::byte mStorage[storage_size];
 
         Interface* mInterface = nullptr;
     };
