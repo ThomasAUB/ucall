@@ -5,13 +5,19 @@
 
 #include "ucall.hpp"
 
+static void foo(int&, std::string_view sv) {
+
+}
+
 TEST_CASE("basic ucall tests") {
+
+    ucall::Callable<void(int&, std::string_view)> c0(foo);
 
     int ic1;
     ucall::Callable<void(int&)> c1(
         [&] (int& i) {
             ic1 = i;
-            std::cout << "from closure lambda " << i++ << std::endl;
+            std::cout << "capturing lambda " << i++ << std::endl;
         }
     );
 
@@ -19,14 +25,14 @@ TEST_CASE("basic ucall tests") {
     ucall::Callable<void(int&)> c2(
         +[] (int& i) {
             ic2 = i;
-            std::cout << "from basic lambda " << i++ << std::endl;
+            std::cout << "non-capturing lambda " << i++ << std::endl;
         }
     );
 
     struct Obj {
         void test(int& i) {
             mI = i;
-            std::cout << "from member function " << i++ << std::endl;
+            std::cout << "member function " << i++ << std::endl;
         }
         int mI;
     };
