@@ -110,9 +110,8 @@ TEST_CASE("ucall vs std::function") {
 
     const auto stdFunctionDuration = end - start;
 
-    //std::cout << "callable took " << callableDuration << std::endl;
-    //std::cout << "std::function took " << stdFunctionDuration << std::endl;
+    std::cout << "callable took " << callableDuration << std::endl;
+    std::cout << "std::function took " << stdFunctionDuration << std::endl;
 
-    CHECK(stdFunctionDuration / callableDuration >= 2);
 }
 

@@ -8,7 +8,6 @@ It's designed as an alternative to `std::function` in contexts where heap alloca
 
 - single header file
 - no heap allocation
-- up to 2.4 times faster than std::function
 
 ## Example
 

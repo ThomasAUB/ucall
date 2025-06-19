@@ -80,7 +80,6 @@ namespace ucall {
 
         Callable(Callable&& other) noexcept {
             if (other.mInterface) {
-                // Reconstruct the vtable pointer and then move the underlying object
                 other.mInterface->move(mStorage);
                 mInterface = reinterpret_cast<Interface*>(mStorage);
                 other.mInterface = nullptr;
