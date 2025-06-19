@@ -21,7 +21,7 @@ void freeFunction(int, bool) {
 void foo() {
 
     // free function
-    ufunc::Callable<void(int, bool)> freeCallable(freeFunction);
+    ucall::Callable<void(int, bool)> freeCallable(freeFunction);
 
     freeCallable(55, true);
     
