@@ -10,7 +10,36 @@ static void foo(int&, std::string_view sv) {
 
 }
 
+void caller(ucall::Callable<void(int)> c) {
+    c(5);
+}
+
 TEST_CASE("basic ucall tests") {
+
+    {
+        ucall::Callable<void(int)> cc(
+            [&] (int i) {
+                std::cout << i << std::endl;
+            }
+        );
+
+        caller(cc);
+
+        caller(
+            ucall::Callable<void(int)>(
+                [&] (int i) {
+                    std::cout << i << std::endl;
+                }
+            )
+        );
+
+        cc(22);
+
+        auto hh = cc;
+
+        hh(789);
+
+    }
 
     ucall::Callable<void(int&, std::string_view)> c0(foo);
 

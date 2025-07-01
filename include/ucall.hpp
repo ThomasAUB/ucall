@@ -30,6 +30,7 @@
 #include <new>
 #include <utility>
 #include <cstddef>
+#include <cstring>
 #include <type_traits>
 
 namespace ucall {
@@ -68,8 +69,11 @@ namespace ucall {
         Callable(const T& obj, return_t(T::* f)(args_t...) const)
             : Callable([&obj, f] (args_t... args) -> return_t { return (obj.*f)(args...); }) {}
 
-        return_t operator()(args_t... args) const {
-            return (*mInterface)(std::forward<args_t>(args)...);
+        Callable(Callable& other) noexcept {
+            if (other.mInterface) {
+                memcpy(mStorage, other.mStorage, storage_size);
+                mInterface = reinterpret_cast<Interface*>(mStorage);
+            }
         }
 
         ~Callable() {
@@ -78,12 +82,8 @@ namespace ucall {
             }
         }
 
-        Callable(Callable&& other) noexcept {
-            if (other.mInterface) {
-                other.mInterface->move(mStorage);
-                mInterface = reinterpret_cast<Interface*>(mStorage);
-                other.mInterface = nullptr;
-            }
+        return_t operator()(args_t... args) const {
+            return (*mInterface)(std::forward<args_t>(args)...);
         }
 
         Callable& operator=(Callable&& other) noexcept {
@@ -94,15 +94,10 @@ namespace ucall {
             return *this;
         }
 
-        Callable(const Callable&) = delete;
-        Callable& operator=(const Callable&) = delete;
-
     private:
 
         struct Interface {
             virtual return_t operator()(args_t...) const = 0;
-            virtual void destroy() = 0;
-            virtual void move(void* dest) = 0;
             virtual ~Interface() = default;
         };
 
@@ -118,13 +113,6 @@ namespace ucall {
                 return mCallable(std::forward<args_t>(args)...);
             }
 
-            void destroy() override {
-                mCallable.~callable_t();
-            }
-
-            void move(void* dest) override {
-                new (dest) Impl(std::move(mCallable));
-            }
         };
 
         static constexpr size_t storage_size = 4 * sizeof(uintptr_t);
