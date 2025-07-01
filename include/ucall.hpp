@@ -30,7 +30,6 @@
 #include <new>
 #include <utility>
 #include <cstddef>
-#include <cstring>
 #include <type_traits>
 
 namespace ucall {
@@ -39,6 +38,8 @@ namespace ucall {
 
     template<typename return_t, typename ...args_t>
     struct Callable<return_t(args_t...)> {
+
+        Callable() = default;
 
         template<typename callable_t,
             typename = std::enable_if_t<
@@ -70,6 +71,7 @@ namespace ucall {
             : Callable([&obj, f] (args_t... args) -> return_t { return (obj.*f)(args...); }) {}
 
         Callable(Callable& other) noexcept {
+            this->~Callable();
             if (other.mInterface) {
                 memcpy(mStorage, other.mStorage, storage_size);
                 mInterface = reinterpret_cast<Interface*>(mStorage);
@@ -88,16 +90,39 @@ namespace ucall {
 
         Callable& operator=(Callable&& other) noexcept {
             if (this != &other) {
-                this->~Callable();
-                ::new(this) Callable(std::move(other));
+                if (mInterface) { mInterface->~Interface(); }
+                if (other.mInterface) {
+                    other.mInterface->copy(this);
+                }
+                else {
+                    mInterface = nullptr;
+                }
             }
             return *this;
+        }
+
+        Callable& operator=(const Callable& other) noexcept {
+            if (this != &other) {
+                if (mInterface) { mInterface->~Interface(); }
+                if (other.mInterface) {
+                    other.mInterface->copy(this);
+                }
+                else {
+                    mInterface = nullptr;
+                }
+            }
+            return *this;
+        }
+
+        operator bool() const {
+            return (mInterface != nullptr);
         }
 
     private:
 
         struct Interface {
             virtual return_t operator()(args_t...) const = 0;
+            virtual void copy(Callable* c) = 0;
             virtual ~Interface() = default;
         };
 
@@ -108,6 +133,11 @@ namespace ucall {
 
             template<typename... targs_t>
             Impl(targs_t&&... args) : mCallable(std::forward<targs_t>(args)...) {}
+
+            void copy(Callable* c) override {
+                new (c->mStorage) Impl(std::move(mCallable));
+                c->mInterface = reinterpret_cast<Interface*>(c->mStorage);
+            }
 
             return_t operator()(args_t... args) const override {
                 return mCallable(std::forward<args_t>(args)...);
