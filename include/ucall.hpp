@@ -71,10 +71,14 @@ namespace ucall {
             : Callable([&obj, f] (args_t... args) -> return_t { return (obj.*f)(args...); }) {}
 
         Callable(Callable& other) noexcept {
-            this->~Callable();
-            if (other.mInterface) {
-                memcpy(mStorage, other.mStorage, storage_size);
-                mInterface = reinterpret_cast<Interface*>(mStorage);
+            if (this != &other) {
+                if (mInterface) { mInterface->~Interface(); }
+                if (other.mInterface) {
+                    other.mInterface->copy(this);
+                }
+                else {
+                    mInterface = nullptr;
+                }
             }
         }
 
