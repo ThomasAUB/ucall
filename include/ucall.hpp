@@ -66,10 +66,6 @@ namespace ucall {
         Callable(return_t(T::* f)(args_t...), T* obj)
             : Callable([obj, f] (args_t... args) -> return_t { return (obj->*f)(args...); }) {}
 
-        template<typename T>
-        Callable(const T& obj, return_t(T::* f)(args_t...) const)
-            : Callable([&obj, f] (args_t... args) -> return_t { return (obj.*f)(args...); }) {}
-
         Callable(Callable& other) noexcept {
             if (this != &other) {
                 if (mInterface) { mInterface->~Interface(); }
@@ -89,6 +85,7 @@ namespace ucall {
         }
 
         return_t operator()(args_t... args) const {
+            if (!mInterface) { while (true); }
             return (*mInterface)(std::forward<args_t>(args)...);
         }
 
