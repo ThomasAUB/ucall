@@ -43,7 +43,8 @@ namespace ucall {
 
         template<typename callable_t,
             typename = std::enable_if_t<
-            std::is_invocable_r_v<return_t, callable_t, args_t...>>
+            std::is_invocable_r_v<return_t, callable_t, args_t...> &&
+            !std::is_same_v<std::decay_t<callable_t>, Callable>>
             >
             Callable(callable_t&& c) {
             using decayed = std::decay_t<callable_t>;
@@ -55,7 +56,8 @@ namespace ucall {
                 alignof(decayed) <= storage_align,
                 "Callable object alignment too strict for internal storage."
                 );
-            mInterface = ::new(mStorage) Impl<decayed>(std::forward<callable_t>(c));
+            ::new(mStorage) decayed(std::forward<callable_t>(c));
+            mOps = &ops_table<decayed>;
         }
 
         template<typename T>
@@ -66,37 +68,44 @@ namespace ucall {
         Callable(return_t(T::* f)(args_t...), T* obj)
             : Callable([obj, f] (args_t... args) -> return_t { return (obj->*f)(args...); }) {}
 
-        Callable(Callable& other) noexcept {
-            if (this != &other) {
-                if (mInterface) { mInterface->~Interface(); }
-                if (other.mInterface) {
-                    other.mInterface->copy(this);
-                }
-                else {
-                    mInterface = nullptr;
-                }
+        Callable(const Callable& other) noexcept {
+            if (other.mOps) {
+                other.mOps->copy(other.mStorage, this->mStorage);
+                mOps = other.mOps;
+            }
+        }
+
+        Callable(Callable&& other) noexcept {
+            if (other.mOps) {
+                other.mOps->copy(other.mStorage, this->mStorage);
+                mOps = other.mOps;
+                other.mOps->destroy(other.mStorage);
+                other.mOps = nullptr;
             }
         }
 
         ~Callable() {
-            if (mInterface) {
-                mInterface->~Interface();
+            if (mOps) {
+                mOps->destroy(mStorage);
             }
         }
 
         return_t operator()(args_t... args) const {
-            if (!mInterface) { while (true); }
-            return (*mInterface)(std::forward<args_t>(args)...);
+            if (!mOps) { while (true); }
+            return mOps->invoke(mStorage, std::forward<args_t>(args)...);
         }
 
         Callable& operator=(Callable&& other) noexcept {
             if (this != &other) {
-                if (mInterface) { mInterface->~Interface(); }
-                if (other.mInterface) {
-                    other.mInterface->copy(this);
+                if (mOps) { mOps->destroy(mStorage); }
+                if (other.mOps) {
+                    other.mOps->copy(other.mStorage, this->mStorage);
+                    mOps = other.mOps;
+                    other.mOps->destroy(other.mStorage);
+                    other.mOps = nullptr;
                 }
                 else {
-                    mInterface = nullptr;
+                    mOps = nullptr;
                 }
             }
             return *this;
@@ -104,54 +113,60 @@ namespace ucall {
 
         Callable& operator=(const Callable& other) noexcept {
             if (this != &other) {
-                if (mInterface) { mInterface->~Interface(); }
-                if (other.mInterface) {
-                    other.mInterface->copy(this);
+                if (mOps) { mOps->destroy(mStorage); }
+                if (other.mOps) {
+                    other.mOps->copy(other.mStorage, this->mStorage);
+                    mOps = other.mOps;
                 }
                 else {
-                    mInterface = nullptr;
+                    mOps = nullptr;
                 }
             }
             return *this;
         }
 
         operator bool() const {
-            return (mInterface != nullptr);
+            return (mOps != nullptr);
         }
 
     private:
 
-        struct Interface {
-            virtual return_t operator()(args_t...) const = 0;
-            virtual void copy(Callable* c) = 0;
-            virtual ~Interface() = default;
+        struct Operations {
+            return_t(*invoke)(const std::byte*, args_t...);
+            void (*destroy)(std::byte*);
+            void (*copy)(const std::byte*, std::byte*);
         };
 
         template<typename callable_t>
-        struct Impl final : Interface {
+        static return_t invoke_impl(const std::byte* storage, args_t... args) {
+            const auto* callable = reinterpret_cast<const callable_t*>(storage);
+            return (*callable)(std::forward<args_t>(args)...);
+        }
 
-            callable_t mCallable;
+        template<typename callable_t>
+        static void destroy_impl(std::byte* storage) {
+            auto* callable = reinterpret_cast<callable_t*>(storage);
+            callable->~callable_t();
+        }
 
-            template<typename... targs_t>
-            Impl(targs_t&&... args) : mCallable(std::forward<targs_t>(args)...) {}
+        template<typename callable_t>
+        static void copy_impl(const std::byte* src, std::byte* dst) {
+            const auto* src_callable = reinterpret_cast<const callable_t*>(src);
+            ::new(dst) callable_t(*src_callable);
+        }
 
-            void copy(Callable* c) override {
-                new (c->mStorage) Impl(std::move(mCallable));
-                c->mInterface = reinterpret_cast<Interface*>(c->mStorage);
-            }
-
-            return_t operator()(args_t... args) const override {
-                return mCallable(std::forward<args_t>(args)...);
-            }
-
+        template<typename callable_t>
+        static constexpr Operations ops_table = {
+            &invoke_impl<callable_t>,
+            &destroy_impl<callable_t>,
+            &copy_impl<callable_t>
         };
 
         static constexpr size_t storage_size = 4 * sizeof(uintptr_t);
         static constexpr size_t storage_align = alignof(std::max_align_t);
 
         alignas(storage_align) std::byte mStorage[storage_size];
-
-        Interface* mInterface = nullptr;
+        const Operations* mOps = nullptr;
     };
 
 }
